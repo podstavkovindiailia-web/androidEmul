@@ -1,0 +1,23 @@
+# Fully containerized setup: Android emulator + web app.
+# Requires a Linux host with KVM (/dev/kvm).
+#   docker compose -f docker-compose.emulator.yml up --build
+services:
+  emulator:
+    image: budtmo/docker-android:emulator_14.0
+    devices:
+      - /dev/kvm
+    environment:
+      EMULATOR_DEVICE: "Samsung Galaxy S10"
+      WEB_VNC: "false"
+    expose:
+      - "5555"
+
+  app:
+    build: .
+    depends_on:
+      - emulator
+    ports:
+      - "8080:8080"
+    environment:
+      # the app runs its own adb server and connects to the emulator over TCP
+      ADB_AUTO_CONNECT: emulator:5555

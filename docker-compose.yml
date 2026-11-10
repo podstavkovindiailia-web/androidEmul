@@ -1,0 +1,16 @@
+# Runs the web app in Docker and uses the adb server of the HOST machine,
+# so emulators started on the host (Android Studio / `emulator -avd ...`) are visible.
+#
+# On the host, restart adb so that it listens on all interfaces:
+#   adb kill-server && adb -a nodaemon server start
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ADB_SERVER_SOCKET: tcp:host.docker.internal:5037
+      # ports created by `adb forward` are opened on the host
+      ADB_FORWARD_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

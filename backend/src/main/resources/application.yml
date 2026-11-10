@@ -1,0 +1,42 @@
+server:
+  port: ${PORT:8080}
+  compression:
+    enabled: true
+
+spring:
+  threads:
+    virtual:
+      enabled: true
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+app:
+  # Origins allowed to open the WebSocket (comma separated patterns)
+  allowed-origins: ${ALLOWED_ORIGINS:*}
+
+emulator:
+  adb:
+    path: ${ADB_PATH:adb}
+    forward-host: ${ADB_FORWARD_HOST:127.0.0.1}
+    auto-connect: ${ADB_AUTO_CONNECT:}
+  scrcpy:
+    server-path: ${SCRCPY_SERVER_PATH:../scrcpy-server/scrcpy-server}
+    version: ${SCRCPY_VERSION:3.1}
+  stream:
+    max-size: ${STREAM_MAX_SIZE:1280}
+    video-bit-rate: ${STREAM_BIT_RATE:8000000}
+    max-fps: ${STREAM_MAX_FPS:60}
+    video-codec-options: ${STREAM_CODEC_OPTIONS:}
+    video-encoder: ${STREAM_ENCODER:}
+    idle-timeout: 10s
+    viewer-queue-size: 30
+
+logging:
+  level:
+    io.androidemul: INFO

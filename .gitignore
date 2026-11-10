@@ -1,0 +1,11 @@
+# build output
+backend/target/
+frontend/node_modules/
+frontend/dist/
+# downloaded binary (scripts/download-scrcpy-server.sh)
+scrcpy-server/
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
