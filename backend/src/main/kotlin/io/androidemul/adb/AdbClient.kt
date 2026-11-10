@@ -26,6 +26,33 @@ class AdbException(message: String, cause: Throwable? = null) : RuntimeException
 class AdbClient(private val props: EmulatorProperties) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /** Resolved adb executable: explicit ADB_PATH, otherwise PATH, ANDROID_HOME / ANDROID_SDK_ROOT and default SDK locations. */
+    val adbPath: String by lazy {
+        val found = adbCandidates().firstOrNull { File(it).let { f -> f.isFile && f.canExecute() } }
+        val resolved = found ?: props.adb.path
+        if (found != null) log.info("Using adb: {}", found) else log.warn("adb not found, falling back to '{}'", resolved)
+        resolved
+    }
+
+    fun adbCandidates(): List<String> {
+        val configured = props.adb.path
+        // an explicit path (anything other than the bare default "adb") is used as is
+        if (configured != "adb") return listOf(configured)
+        val exe = if (System.getProperty("os.name").lowercase().startsWith("windows")) "adb.exe" else "adb"
+        val home = System.getProperty("user.home")
+        val pathDirs = System.getenv("PATH").orEmpty().split(File.pathSeparator).filter { it.isNotBlank() }
+        val sdkDirs = listOfNotNull(
+            System.getenv("ANDROID_HOME"),
+            System.getenv("ANDROID_SDK_ROOT"),
+            "$home/Android/Sdk", // Linux (Android Studio default)
+            "$home/Library/Android/sdk", // macOS
+            System.getenv("LOCALAPPDATA")?.let { "$it\\Android\\Sdk" }, // Windows
+            "/opt/android-sdk",
+            "/usr/lib/android-sdk",
+        ).map { File(it, "platform-tools").path }
+        return (pathDirs + sdkDirs).map { File(it, exe).path }.distinct()
+    }
+
     fun devices(): List<AdbDevice> {
         val output = run(listOf("devices", "-l"))
         return parseDevices(output)
@@ -52,7 +79,7 @@ class AdbClient(private val props: EmulatorProperties) {
 
     /** Starts a long-running `adb shell` command; the caller owns the process. */
     fun startShell(serial: String, command: List<String>): Process =
-        ProcessBuilder(listOf(props.adb.path, "-s", serial, "shell") + command)
+        ProcessBuilder(listOf(adbPath, "-s", serial, "shell") + command)
             .redirectErrorStream(true)
             .start()
 
@@ -68,11 +95,15 @@ class AdbClient(private val props: EmulatorProperties) {
     }
 
     private fun run(args: List<String>): String {
-        val cmd = listOf(props.adb.path) + args
+        val cmd = listOf(adbPath) + args
         val process = try {
             ProcessBuilder(cmd).redirectErrorStream(true).start()
         } catch (e: Exception) {
-            throw AdbException("Cannot start '${props.adb.path}'. Is adb installed and in PATH?", e)
+            throw AdbException(
+                "Cannot start adb ('$adbPath'). Install Android SDK platform-tools and either add them to PATH, " +
+                    "set ANDROID_HOME, or set ADB_PATH=/path/to/adb. Searched: ${adbCandidates().joinToString()}",
+                e,
+            )
         }
         // Read output on a separate thread so that a chatty process cannot deadlock on a full pipe.
         var output = ""

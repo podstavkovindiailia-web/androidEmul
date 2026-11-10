@@ -98,5 +98,5 @@ li.disabled { opacity: .6; cursor: not-allowed; }
 .connect input { flex: 1; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; margin: 0; }
-.error { color: var(--danger); }
+.error { color: var(--danger); overflow-wrap: anywhere; font-size: 12px; }
 </style>

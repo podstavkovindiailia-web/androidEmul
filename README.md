@@ -41,8 +41,12 @@ flowchart LR
 
 ## Быстрый старт (разработка)
 
-Требования: JDK 21, Maven 3.9+, Node.js 20+, Android SDK `platform-tools` (`adb` в `PATH`) и запущенный эмулятор
+Требования: JDK 21, Maven 3.9+, Node.js 20+, Android SDK `platform-tools` и запущенный эмулятор
 (`emulator -avd <name>` или Android Studio). Проверьте, что `adb devices` его видит.
+
+`adb` ищется по порядку: `ADB_PATH` → `PATH` → `$ANDROID_HOME/platform-tools` → `$ANDROID_SDK_ROOT/platform-tools` →
+`~/Android/Sdk/platform-tools` (Linux) → `~/Library/Android/sdk/platform-tools` (macOS) → `%LOCALAPPDATA%\Android\Sdk\platform-tools` (Windows).
+Если SDK стоит в другом месте — задайте `ADB_PATH=/path/to/adb` или `ANDROID_HOME`.
 
 ```bash
 ./scripts/download-scrcpy-server.sh
@@ -107,7 +111,7 @@ docker compose -f docker-compose.emulator.yml up --build
 | Переменная | По умолчанию | Описание |
 |---|---|---|
 | `PORT` | `8080` | HTTP-порт |
-| `ADB_PATH` | `adb` | путь к adb |
+| `ADB_PATH` | автопоиск | путь к adb (если не задан — `PATH`, `ANDROID_HOME`, стандартные папки SDK) |
 | `ADB_FORWARD_HOST` | `127.0.0.1` | где открываются порты `adb forward` (для adb-сервера хоста из Docker — `host.docker.internal`) |
 | `ADB_AUTO_CONNECT` | — | адреса для автоматического `adb connect`, через запятую |
 | `SCRCPY_SERVER_PATH` | `../scrcpy-server/scrcpy-server` | локальный файл scrcpy-server |
