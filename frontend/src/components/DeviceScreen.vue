@@ -163,7 +163,7 @@ function sendTouch(action: number, e: PointerEvent, androidId: number) {
 function onPointerDown(e: PointerEvent) {
   viewport.value?.focus()
   if (e.pointerType === 'mouse' && e.button !== 0) {
-    // scrcpy-like shortcuts: right click = BACK, middle click = HOME
+    // shortcuts: right click = BACK, middle click = HOME
     if (e.button === 2) {
       send({ type: 'backOrScreenOn', action: ACTION_DOWN })
       send({ type: 'backOrScreenOn', action: ACTION_UP })

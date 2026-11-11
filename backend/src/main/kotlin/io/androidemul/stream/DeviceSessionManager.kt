@@ -2,9 +2,7 @@ package io.androidemul.stream
 
 import io.androidemul.adb.AdbClient
 import io.androidemul.config.EmulatorProperties
-import io.androidemul.config.StreamMode
 import io.androidemul.nativeengine.NativeSession
-import io.androidemul.scrcpy.ScrcpySession
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.DisposableBean
 import org.springframework.stereotype.Component
@@ -23,10 +21,6 @@ class DeviceSessionManager(
     private val sessions = ConcurrentHashMap<String, DeviceSession>()
     private val pendingStops = ConcurrentHashMap<String, ScheduledFuture<*>>()
     private val scheduler = Executors.newSingleThreadScheduledExecutor { Thread(it, "session-idle").apply { isDaemon = true } }
-
-    init {
-        log.info("Streaming engine: {}", props.mode)
-    }
 
     @Synchronized
     fun attach(serial: String, viewer: StreamViewer): DeviceSession {
@@ -56,10 +50,7 @@ class DeviceSessionManager(
 
     fun activeSessions(): Map<String, DeviceSession.State> = sessions.mapValues { it.value.state }
 
-    private fun create(serial: String): DeviceSession = when (props.mode) {
-        StreamMode.NATIVE -> NativeSession(serial, adb, props, ::onTerminated)
-        StreamMode.SCRCPY -> ScrcpySession(serial, adb, props, ::onTerminated)
-    }
+    private fun create(serial: String): DeviceSession = NativeSession(serial, adb, props, ::onTerminated)
 
     private fun onTerminated(session: DeviceSession) {
         sessions.remove(session.serial, session)

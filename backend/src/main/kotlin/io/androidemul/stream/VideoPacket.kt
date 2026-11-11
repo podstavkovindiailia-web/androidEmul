@@ -1,6 +1,6 @@
 package io.androidemul.stream
 
-/** One packet of the scrcpy video stream (H.264 Annex B). */
+/** One packet of the H.264 (Annex B) video stream: codec config (SPS/PPS) or one frame. */
 class VideoPacket(
     val config: Boolean,
     val keyFrame: Boolean,
@@ -28,16 +28,5 @@ class VideoPacket(
         const val HEADER_SIZE = 9
         const val FLAG_CONFIG = 1
         const val FLAG_KEY_FRAME = 2
-
-        // scrcpy frame header (12 bytes): [pts_and_flags:8][size:4]
-        const val SCRCPY_FLAG_CONFIG = 1L shl 63
-        const val SCRCPY_FLAG_KEY_FRAME = 1L shl 62
-        const val SCRCPY_PTS_MASK = SCRCPY_FLAG_KEY_FRAME - 1
-
-        fun fromScrcpyHeader(ptsAndFlags: Long, data: ByteArray): VideoPacket {
-            val config = (ptsAndFlags and SCRCPY_FLAG_CONFIG) != 0L
-            val key = (ptsAndFlags and SCRCPY_FLAG_KEY_FRAME) != 0L
-            return VideoPacket(config, key, if (config) 0 else ptsAndFlags and SCRCPY_PTS_MASK, data)
-        }
     }
 }

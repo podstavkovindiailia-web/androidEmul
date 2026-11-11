@@ -1,6 +1,5 @@
 backend/target
 frontend/node_modules
 frontend/dist
-scrcpy-server
 .git
 .idea

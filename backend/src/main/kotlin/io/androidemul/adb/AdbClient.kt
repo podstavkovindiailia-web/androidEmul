@@ -58,23 +58,6 @@ class AdbClient(private val props: EmulatorProperties) {
         return parseDevices(output)
     }
 
-    fun push(serial: String, local: File, remote: String) {
-        if (!local.isFile) throw AdbException("File not found: ${local.absolutePath}")
-        run(listOf("-s", serial, "push", local.absolutePath, remote))
-    }
-
-    fun forward(serial: String, localPort: Int, remote: String) {
-        run(listOf("-s", serial, "forward", "tcp:$localPort", remote))
-    }
-
-    fun removeForward(serial: String, localPort: Int) {
-        try {
-            run(listOf("-s", serial, "forward", "--remove", "tcp:$localPort"))
-        } catch (e: AdbException) {
-            log.debug("Failed to remove forward tcp:{} for {}: {}", localPort, serial, e.message)
-        }
-    }
-
     fun connect(address: String): String = run(listOf("connect", address)).trim()
 
     /** Runs a short shell command on the device and returns its output. */

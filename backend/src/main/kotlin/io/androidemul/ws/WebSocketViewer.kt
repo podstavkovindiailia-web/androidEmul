@@ -14,7 +14,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.LinkedBlockingQueue
 
 /**
- * Bridges a scrcpy session to one browser.
+ * Bridges a device session to one browser.
  *
  * Every viewer has its own outgoing queue and sender thread so a slow browser never stalls the device stream or other viewers.
  * If the queue grows beyond [maxQueuedPackets] (network cannot keep up), all queued video is dropped and the viewer skips

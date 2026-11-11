@@ -49,7 +49,7 @@ class DeviceController(
     }
 
     @GetMapping("/config")
-    fun config() = mapOf("mode" to props.mode.name.lowercase(), "stream" to props.stream)
+    fun config() = props.stream
 
     @ExceptionHandler(AdbException::class)
     fun adbError(e: AdbException) = ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(mapOf("error" to e.message))

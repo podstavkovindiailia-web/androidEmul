@@ -5,20 +5,12 @@
 
 - **Backend:** Kotlin + Spring Boot (Maven), WebSocket, Java 21 virtual threads
 - **Frontend:** Vue 3 + TypeScript + Vite, WebCodecs `VideoDecoder`
-- **На устройстве:** ничего не устанавливается — по умолчанию используются только стандартные утилиты Android через `adb`
+- **На устройстве:** ничего не устанавливается — только стандартные утилиты Android через `adb`
 
-## Два движка
+## Как это работает
 
-| | `native` (по умолчанию) | `scrcpy` (опционально) |
-|---|---|---|
-| Что нужно | только `adb` | `adb` + файл [scrcpy-server](https://github.com/Genymobile/scrcpy) 3.1 |
-| Видео | `screenrecord --output-format=h264` — встроенная утилита Android, аппаратный энкодер устройства | scrcpy-server, аппаратный энкодер |
-| Касания | сырые события тачскрина через `sendevent` в постоянную `adb shell`-сессию, мультитач | `InputManager.injectInputEvent` |
-| Клавиши, текст, прокрутка | `input keyevent` / `input text` / `input swipe` (≈0.2–0.5 с на команду) | мгновенно |
-| Задержка видео | низкая, но выше, чем у scrcpy | минимальная |
-| Ограничения | на Android < 14 запись идёт сегментами по 3 минуты (перезапуск незаметен, ~0.3 с); новый key frame = перезапуск записи | — |
-
-Режим выбирается переменной `EMULATOR_MODE=native|scrcpy`.
+Используются только стандартные утилиты Android, вызываемые через `adb`. На эмулятор ничего не устанавливается,
+сторонних программ и сервисов нет.
 
 ```mermaid
 flowchart LR
@@ -43,7 +35,7 @@ flowchart LR
   W -- "постоянный adb shell" --> I
 ```
 
-## Как устроен native-движок
+## Подробности
 
 - **Видео.** `adb exec-out screenrecord --output-format=h264 --size WxH --bit-rate N -` отдаёт сырой поток H.264.
   У него нет заголовков пакетов, поэтому backend сам режет его на SPS/PPS и кадры (`AnnexBParser`). Кадр отправляется,
@@ -87,16 +79,6 @@ cd frontend && npm install && npm run dev
 
 Откройте http://localhost:5173 и выберите устройство слева. Vite проксирует `/api` и `/ws` на `localhost:8080`.
 
-Режим scrcpy (по желанию):
-
-```bash
-./scripts/download-scrcpy-server.sh
-```
-
-```bash
-cd backend && EMULATOR_MODE=scrcpy mvn spring-boot:run
-```
-
 ## Сборка в один jar
 
 ```bash
@@ -130,8 +112,7 @@ docker compose up --build
 docker compose -f docker-compose.emulator.yml up --build
 ```
 
-Образ по умолчанию содержит только `adb`. Чтобы добавить scrcpy-server, соберите с `--build-arg WITH_SCRCPY=true`
-и запустите с `EMULATOR_MODE=scrcpy`.
+Образ содержит только JRE и `adb`.
 
 ## Использование
 
@@ -148,21 +129,14 @@ docker compose -f docker-compose.emulator.yml up --build
 
 | Переменная | По умолчанию | Описание |
 |---|---|---|
-| `EMULATOR_MODE` | `native` | движок: `native` (встроенные утилиты Android) или `scrcpy` |
 | `PORT` | `8080` | HTTP-порт |
 | `ADB_PATH` | автопоиск | путь к adb (если не задан — `PATH`, `ANDROID_HOME`, стандартные папки SDK) |
-| `ADB_FORWARD_HOST` | `127.0.0.1` | только scrcpy: где открываются порты `adb forward` (из Docker — `host.docker.internal`) |
 | `ADB_AUTO_CONNECT` | — | адреса для автоматического `adb connect`, через запятую |
 | `STREAM_MAX_SIZE` | `1280` | максимальная сторона видео, `0` — нативное разрешение |
 | `STREAM_BIT_RATE` | `8000000` | битрейт H.264 |
-| `STREAM_MAX_FPS` | `60` | только scrcpy: ограничение FPS |
-| `STREAM_CODEC_OPTIONS` | — | только scrcpy: опции MediaCodec, например `i-frame-interval=2` |
-| `STREAM_ENCODER` | — | только scrcpy: конкретный энкодер |
-| `SCRCPY_SERVER_PATH` | `../scrcpy-server/scrcpy-server` | только scrcpy: локальный файл scrcpy-server |
-| `SCRCPY_VERSION` | `3.1` | только scrcpy: версия (должна совпадать с файлом) |
 | `ALLOWED_ORIGINS` | `*` | разрешённые Origin для WebSocket |
 
-Тонкие настройки native-движка (`emulator.native.*`): `rotation-poll-interval`, `key-frame-cooldown`, `frame-flush-delay`.
+Тонкие настройки (`emulator.native.*`): `rotation-poll-interval`, `key-frame-cooldown`, `frame-flush-delay`.
 
 ## Протокол
 
@@ -170,10 +144,10 @@ docker compose -f docker-compose.emulator.yml up --build
 
 - `GET /api/devices` — список устройств из `adb devices -l`;
 - `POST /api/devices/connect?address=host:port` — `adb connect`;
-- `GET /api/config` — режим и параметры видеопотока;
+- `GET /api/config` — параметры видеопотока;
 - `GET /api/devices/{serial}/diagnostics` — диагностика ввода (тачскрины, `dumpsys input`, пробный `sendevent`).
 
-**WebSocket `/ws/stream/{serial}`** (одинаковый для обоих движков)
+**WebSocket `/ws/stream/{serial}`**
 
 Сервер → клиент:
 
@@ -200,8 +174,7 @@ docker compose -f docker-compose.emulator.yml up --build
 backend/   Spring Boot (Kotlin)
   adb/           обёртка над adb CLI
   stream/        общая сессия устройства, менеджер сессий, видеопакеты, протокол клиента
-  nativeengine/  движок без сторонних программ: screenrecord, AnnexBParser, sendevent, input
-  scrcpy/        опциональный движок на scrcpy-server
+  nativeengine/  screenrecord, AnnexBParser, sendevent, input
   ws/            WebSocket-обработчик, очередь зрителя
   api/           REST
 frontend/  Vue 3
@@ -209,7 +182,6 @@ frontend/  Vue 3
   lib/stream.ts    WebSocket-клиент
   lib/keymap.ts    клавиатура → Android keycodes
   components/      список устройств, экран с вводом
-scripts/   загрузка scrcpy-server (только для режима scrcpy)
 ```
 
 ## Если касания не работают
@@ -222,12 +194,11 @@ scripts/   загрузка scrcpy-server (только для режима scrc
    http://localhost:8080/api/devices/emulator-5554/diagnostics
    ```
 
-3. Временно можно переключиться на движок scrcpy: `EMULATOR_MODE=scrcpy` (см. выше).
 
 ## Ограничения
 
 - Звук не транслируется.
-- `input text` (native) печатает только ASCII; кириллицу и эмодзи так не ввести.
-- В native-режиме клавиши и текст идут через `input` и приходят с задержкой ~0.2–0.5 с; касания — без неё.
+- `input text` печатает только ASCII; кириллицу и эмодзи так не ввести.
+- Клавиши и текст идут через `input` и приходят с задержкой ~0.2–0.5 с; касания — без неё.
 - Экраны с `FLAG_SECURE` (банковские приложения и т. п.) `screenrecord` показывает чёрными.
 - Аутентификации нет: не выставляйте сервис в открытую сеть без reverse proxy с авторизацией.
