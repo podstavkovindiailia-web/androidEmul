@@ -4,7 +4,15 @@ import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.concurrent.CopyOnWriteArraySet
 
-data class SessionInfo(val serial: String, val deviceName: String, val codec: String, val width: Int, val height: Int)
+data class SessionInfo(
+    val serial: String,
+    val deviceName: String,
+    val codec: String,
+    val width: Int,
+    val height: Int,
+    /** How input reaches the device (shown in the UI for diagnostics). */
+    val input: String? = null,
+)
 
 /** Receives the video stream of a session. Callbacks are invoked from the session threads and must never block. */
 interface StreamViewer {

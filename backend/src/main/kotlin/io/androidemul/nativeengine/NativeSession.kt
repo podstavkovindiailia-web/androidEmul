@@ -35,8 +35,12 @@ class NativeSession(
     @Volatile private var rotation = 0
     @Volatile private var naturalSize = DisplaySize(0, 0)
 
-    private var touchShell: ShellChannel? = null
-    private var commandShell: ShellChannel? = null
+    private var touchShell: CommandShell? = null
+    private var commandShell: CommandShell? = null
+    @Volatile private var touchMode = TouchMode.TAP_SWIPE
+    @Volatile private var motionEventSupported: Boolean? = null
+    /** Last position of the single finger in MOTIONEVENT mode (display pixels). */
+    private var motionLast: Pair<Int, Int>? = null
     private var touchWorker: CoalescingWorker<TouchOp>? = null
     private var commandWorker: CoalescingWorker<CommandOp>? = null
     private var injector: TouchInjector? = null
@@ -67,29 +71,35 @@ class NativeSession(
             ?: throw IOException("Cannot read the display size (`wm size`)")
         rotation = readRotation() ?: 0
 
-        val touch = runCatching { DeviceProbe.parseTouchDevice(adb.shellOutput(serial, "getevent -lp")) }.getOrNull()
-        if (touch != null) {
+        val shell = openShell("touch")
+        touchShell = shell
+        val plan = TouchSetup(adb, serial, log).plan(shell)
+        touchMode = plan.mode
+        motionEventSupported = if (plan.mode == TouchMode.SENDEVENT) null else plan.mode == TouchMode.MOTIONEVENT
+        plan.device?.let { injector = TouchInjector(it) }
+        if (plan.mode == TouchMode.SENDEVENT) {
+            val d = plan.device!!
             log.info(
-                "Touchscreen {} '{}' x={}..{} y={}..{} slots={}",
-                touch.path, touch.name, touch.x.min, touch.x.max, touch.y.min, touch.y.max, touch.maxSlot + 1,
+                "Touch input: sendevent {} '{}' x={}..{} y={}..{} slots={}",
+                d.path, d.name, d.x.min, d.x.max, d.y.min, d.y.max, d.maxSlot + 1,
             )
-            injector = TouchInjector(touch)
-            val shell = ShellChannel("touch-$serial", adb.startShell(serial, listOf("sh")), log)
-            touchShell = shell
-            touchWorker = CoalescingWorker("touch-$serial", log, TouchOp::merge, ::executeTouch)
         } else {
-            log.warn("No accessible touchscreen found via getevent; falling back to `input tap/swipe` (no live drag)")
+            log.warn("Touch input: {} - {}", plan.mode.label, plan.reason)
         }
-        val cmd = ShellChannel("cmd-$serial", adb.startShell(serial, listOf("sh")), log)
+        touchWorker = CoalescingWorker("touch-$serial", log, TouchOp::merge, ::executeTouch)
+
+        val cmd = openShell("cmd")
         commandShell = cmd
         commandWorker = CoalescingWorker("cmd-$serial", log, CommandOp::merge) { batch ->
             val size = displaySize
-            cmd.run(batch.map { CommandOp.render(it, size) }, timeoutMs = 15_000)
+            val result = cmd.run(batch.map { CommandOp.render(it, size) }, timeoutMs = 15_000)
+            if (result.output.isNotEmpty()) log.warn("[cmd] {}", result.text)
         }
 
         val video = DeviceProbe.videoSize(displaySize, props.stream.maxSize)
         log.info("Display {}x{} rotation {}, video {}x{}", naturalSize.width, naturalSize.height, rotation, video.width, video.height)
-        if (!markRunning(SessionInfo(serial, model.ifBlank { serial }, "h264", video.width, video.height))) return
+        val info = SessionInfo(serial, model.ifBlank { serial }, "h264", video.width, video.height, input = touchMode.label)
+        if (!markRunning(info)) return
 
         startRecorder()
         Thread.ofVirtual().name("rotation-$serial").start(::watchRotation)
@@ -202,6 +212,16 @@ class NativeSession(
         }
     }
 
+    /** A persistent `adb shell sh`; if its stdin does not work on this setup, one `adb shell` per batch. */
+    private fun openShell(name: String): CommandShell {
+        val channel = ShellChannel("$name-$serial", adb.startShell(serial, listOf("sh")), log)
+        val probe = channel.run(listOf("echo ready"), timeoutMs = 5000)
+        if (probe.ok && probe.output.any { it.trim() == "ready" }) return channel
+        log.warn("Persistent adb shell ({}) does not respond ({}); using one adb call per batch", name, probe.text)
+        channel.close()
+        return OneShotShell(adb, serial)
+    }
+
     private fun readRotation(): Int? {
         val input = adb.shellOutput(serial, "dumpsys input | grep -E -m 4 'SurfaceOrientation|orientation='")
         return DeviceProbe.parseRotation(input)
@@ -256,7 +276,7 @@ class NativeSession(
         val u = t.x.toDouble() / (t.width - 1)
         val v = t.y.toDouble() / (t.height - 1)
         val worker = touchWorker
-        if (worker != null) {
+        if (worker != null && touchMode != TouchMode.TAP_SWIPE) {
             val slot = t.pointerId.toInt()
             when (t.action) {
                 ACTION_DOWN -> worker.submit(TouchOp.Down(slot, u, v))
@@ -269,16 +289,46 @@ class NativeSession(
     }
 
     private fun executeTouch(batch: List<TouchOp>) {
-        val inj = injector ?: return
-        val r = rotation
-        val lines = batch.flatMap { op ->
-            when (op) {
-                is TouchOp.Down -> inj.down(op.slot, op.u, op.v, r)
-                is TouchOp.Move -> inj.move(op.slot, op.u, op.v, r)
-                is TouchOp.Up -> inj.up(op.slot)
+        val shell = touchShell ?: return
+        when (touchMode) {
+            TouchMode.SENDEVENT -> {
+                val inj = injector ?: return
+                val r = rotation
+                val lines = batch.flatMap { op ->
+                    when (op) {
+                        is TouchOp.Down -> inj.down(op.slot, op.u, op.v, r)
+                        is TouchOp.Move -> inj.move(op.slot, op.u, op.v, r)
+                        is TouchOp.Up -> inj.up(op.slot)
+                    }
+                }
+                val result = shell.run(lines)
+                // sendevent prints nothing on success: any output is an error (permission denied, no such device...)
+                if (result.output.isNotEmpty()) switchFromSendevent(result.text)
             }
+            TouchMode.MOTIONEVENT -> {
+                val size = displaySize
+                fun px(u: Double, v: Double) = (u * (size.width - 1)).toInt() to (v * (size.height - 1)).toInt()
+                val lines = batch.filter { it.slot == 0 }.mapNotNull { op ->
+                    when (op) {
+                        is TouchOp.Down -> px(op.u, op.v).also { motionLast = it }.let { "input motionevent DOWN ${it.first} ${it.second}" }
+                        is TouchOp.Move -> motionLast?.let { px(op.u, op.v).also { p -> motionLast = p } }?.let { "input motionevent MOVE ${it.first} ${it.second}" }
+                        is TouchOp.Up -> motionLast?.let { "input motionevent UP ${it.first} ${it.second}" }.also { motionLast = null }
+                    }
+                }
+                val result = shell.run(lines, timeoutMs = 10_000)
+                if (result.output.isNotEmpty()) log.warn("[touch] {}", result.text)
+            }
+            TouchMode.TAP_SWIPE -> Unit
         }
-        touchShell?.run(lines)
+    }
+
+    private fun switchFromSendevent(error: String) {
+        if (touchMode != TouchMode.SENDEVENT) return
+        val supported = motionEventSupported
+            ?: runCatching { adb.shellOutput(serial, "input 2>&1; true").contains("motionevent") }.getOrDefault(false)
+        motionEventSupported = supported
+        touchMode = if (supported) TouchMode.MOTIONEVENT else TouchMode.TAP_SWIPE
+        log.error("sendevent failed: {}. Touch input switched to {}", error, touchMode.label)
     }
 
     /** Without access to the touchscreen node: replay the gesture with `input tap` / `input swipe` when the finger lifts. */

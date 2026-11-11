@@ -55,6 +55,45 @@ class DeviceProbeTest {
         assertEquals(true, d.hasBtnTouch)
     }
 
+    private val dumpsysInput = """
+        Event Hub State:
+          Devices:
+            4: virtio_input_multi_touch_2
+              Classes: TOUCH | TOUCH_MT
+              Path: /dev/input/event3
+              Enabled: true
+              Descriptor: abc
+            5: virtio_input_multi_touch_1
+              Classes: TOUCH | TOUCH_MT
+              Path: /dev/input/event1
+              Enabled: false
+              Descriptor: def
+        Input Reader State (Nums of device: 2):
+          Device 4: virtio_input_multi_touch_2
+            EventHub Devices: [ 4 ]
+            Touch Input Mapper (mode - DIRECT):
+              Viewport INTERNAL: displayId=0, uniqueId=local:1, port=0, orientation=0, logicalFrame=[0, 0, 1080, 2400]
+          Device 5: virtio_input_multi_touch_1
+            EventHub Devices: [ 5 ]
+            Touch Input Mapper (mode - DIRECT):
+              Viewport: <none>
+    """.trimIndent()
+
+    @Test
+    fun `dumpsys input decides between the emulator's virtual touchscreens`() {
+        assertEquals(mapOf("/dev/input/event3" to true, "/dev/input/event1" to false), DeviceProbe.parseEnabledStates(dumpsysInput))
+        assertEquals(setOf("virtio_input_multi_touch_2"), DeviceProbe.parseDisplayBoundDevices(dumpsysInput))
+        val ranked = DeviceProbe.rankTouchDevices(emulatorGetevent, dumpsysInput)
+        assertEquals(listOf("/dev/input/event3"), ranked.map { it.path }) // event1 is disabled
+    }
+
+    @Test
+    fun `without dumpsys the lowest numbered virtual touchscreen wins`() {
+        val ranked = DeviceProbe.rankTouchDevices(emulatorGetevent, "")
+        assertEquals(listOf("virtio_input_multi_touch_1", "virtio_input_multi_touch_2"), ranked.map { it.name })
+        assertEquals(AxisRange(0, 9), ranked.first().trackingId)
+    }
+
     @Test
     fun `no touch device`() {
         assertNull(DeviceProbe.parseTouchDevice("add device 1: /dev/input/event0\n  name:     \"qwerty2\"\n"))
@@ -72,6 +111,8 @@ class DeviceProbeTest {
         assertEquals(1, DeviceProbe.parseRotation("      SurfaceOrientation: 1\n"))
         assertEquals(3, DeviceProbe.parseRotation("Viewport INTERNAL: displayId=0, uniqueId=local:1, port=0, orientation=3, logicalFrame=[0, 0, 2400, 1080]"))
         assertEquals(2, DeviceProbe.parseRotation("  mRotation=2 mDeferredRotationPauseCount=0"))
+        // the default display's viewport wins over other orientation lines
+        assertEquals(1, DeviceProbe.parseRotation("Viewport VIRTUAL: displayId=2, orientation=0\nViewport INTERNAL: displayId=0, uniqueId=local:1, port=0, orientation=1, logicalFrame=[]"))
         assertNull(DeviceProbe.parseRotation(""))
     }
 

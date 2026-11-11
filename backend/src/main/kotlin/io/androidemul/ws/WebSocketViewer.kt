@@ -37,7 +37,7 @@ class WebSocketViewer(
     private val sender = Thread.ofVirtual().name("ws-sender-${ws.id}").start(::sendLoop)
 
     override fun onStarted(info: SessionInfo) {
-        sendJson(mapOf("type" to "started", "deviceName" to info.deviceName, "codec" to info.codec, "width" to info.width, "height" to info.height))
+        sendJson(mapOf("type" to "started", "deviceName" to info.deviceName, "codec" to info.codec, "width" to info.width, "height" to info.height, "input" to info.input))
     }
 
     override fun onPacket(packet: VideoPacket) {

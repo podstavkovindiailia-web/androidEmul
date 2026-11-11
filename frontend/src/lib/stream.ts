@@ -1,6 +1,6 @@
 export type ServerMessage =
   | { type: 'starting'; serial: string }
-  | { type: 'started'; deviceName: string; codec: string; width: number; height: number }
+  | { type: 'started'; deviceName: string; codec: string; width: number; height: number; input?: string }
   | { type: 'closed'; reason: string }
   | { type: 'pong'; t: number }
 

@@ -7,7 +7,12 @@ package io.androidemul.nativeengine
  */
 class TouchInjector(private val device: TouchDevice) {
     private val activeSlots = mutableSetOf<Int>()
-    private var nextTrackingId = 1
+    /** slot -> tracking id of the contact currently down in that slot */
+    private val activeIds = mutableMapOf<Int, Int>()
+    // Tracking ids must stay inside the range the device advertises and be unique among active contacts.
+    private val idMin = maxOf(device.trackingId?.min ?: 0, 0)
+    private val idMax = device.trackingId?.max?.takeIf { it > idMin } ?: 0xfffe
+    private var nextTrackingId = idMin
 
     val maxPointers: Int get() = if (device.multiTouch) device.maxSlot + 1 else 1
 
@@ -18,8 +23,9 @@ class TouchInjector(private val device: TouchDevice) {
         if (device.multiTouch) {
             if (slot in activeSlots) out += up(slot, sync = false)
             out += abs(ABS_MT_SLOT, slot)
-            out += abs(ABS_MT_TRACKING_ID, nextTrackingId)
-            nextTrackingId = if (nextTrackingId >= 0xfffe) 1 else nextTrackingId + 1
+            val id = allocTrackingId()
+            activeIds[slot] = id
+            out += abs(ABS_MT_TRACKING_ID, id)
             out += abs(ABS_MT_POSITION_X, x)
             out += abs(ABS_MT_POSITION_Y, y)
             device.pressure?.let { out += abs(ABS_MT_PRESSURE, mid(it)) }
@@ -55,6 +61,7 @@ class TouchInjector(private val device: TouchDevice) {
     fun up(slot: Int, sync: Boolean = true): List<String> {
         if (slot !in activeSlots) return emptyList()
         activeSlots -= slot
+        activeIds -= slot
         val out = mutableListOf<String>()
         if (device.multiTouch) {
             out += abs(ABS_MT_SLOT, slot)
@@ -66,6 +73,19 @@ class TouchInjector(private val device: TouchDevice) {
         }
         if (sync) out += syn()
         return out
+    }
+
+    private fun allocTrackingId(): Int {
+        val used = activeIds.values.toSet()
+        var id = nextTrackingId
+        repeat(idMax - idMin + 1) {
+            if (id !in used) {
+                nextTrackingId = if (id >= idMax) idMin else id + 1
+                return id
+            }
+            id = if (id >= idMax) idMin else id + 1
+        }
+        return idMin
     }
 
     fun releaseAll(): List<String> = activeSlots.toList().flatMap { up(it) }

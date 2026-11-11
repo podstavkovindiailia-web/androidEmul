@@ -4,11 +4,14 @@ import io.androidemul.adb.AdbClient
 import io.androidemul.adb.AdbDevice
 import io.androidemul.adb.AdbException
 import io.androidemul.config.EmulatorProperties
+import io.androidemul.nativeengine.TouchSetup
+import org.slf4j.LoggerFactory
 import io.androidemul.stream.DeviceSessionManager
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -36,6 +39,13 @@ class DeviceController(
     fun connect(@RequestParam address: String): Map<String, String> {
         require(Regex("^[A-Za-z0-9.\\-]+:\\d{1,5}$").matches(address)) { "Expected host:port" }
         return mapOf("result" to adb.connect(address))
+    }
+
+    /** Touch/display diagnostics for the native engine: paste the output when touches do not work. */
+    @GetMapping("/devices/{serial}/diagnostics")
+    fun diagnostics(@PathVariable serial: String): Map<String, Any?> {
+        require(Regex("^[A-Za-z0-9._:\\-\\[\\]]{1,128}$").matches(serial)) { "Invalid device serial" }
+        return TouchSetup(adb, serial, LoggerFactory.getLogger(TouchSetup::class.java)).diagnostics()
     }
 
     @GetMapping("/config")

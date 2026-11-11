@@ -121,7 +121,7 @@ class ScrcpySession(
         if (codecId != CODEC_ID_H264) throw IOException("Unexpected codec id 0x%08x".format(codecId))
 
         log.info("Streaming '{}' {}x{}", deviceName, width, height)
-        if (!markRunning(SessionInfo(serial, deviceName, "h264", width, height))) return
+        if (!markRunning(SessionInfo(serial, deviceName, "h264", width, height, input = "scrcpy"))) return
 
         Thread.ofVirtual().name("scrcpy-ctrl-$serial").start { drainDeviceMessages(control) }
         Thread.ofPlatform().name("scrcpy-video-$serial").daemon(true).start { readVideo(input) }

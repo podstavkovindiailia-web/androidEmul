@@ -16,7 +16,7 @@ class TouchInjectorTest {
     fun `multi-touch protocol B sequence`() {
         val inj = TouchInjector(device)
         assertEquals(
-            listOf(ev(3, 0x2f, 0), ev(3, 0x39, 1), ev(3, 0x35, 500), ev(3, 0x36, 1000), ev(3, 0x3a, 127), ev(1, 0x14a, 1), ev(0, 0, 0)),
+            listOf(ev(3, 0x2f, 0), ev(3, 0x39, 0), ev(3, 0x35, 500), ev(3, 0x36, 1000), ev(3, 0x3a, 127), ev(1, 0x14a, 1), ev(0, 0, 0)),
             inj.down(0, 0.5, 0.5, 0),
         )
         // second finger: no BTN_TOUCH
@@ -26,6 +26,20 @@ class TouchInjectorTest {
         // last finger up releases BTN_TOUCH
         assertEquals(listOf(ev(3, 0x2f, 1), ev(3, 0x39, -1), ev(1, 0x14a, 0), ev(0, 0, 0)), inj.up(1))
         assertEquals(emptyList(), inj.move(0, 0.2, 0.2, 0))
+    }
+
+    @Test
+    fun `tracking ids stay in the advertised range and are unique among active contacts`() {
+        val inj = TouchInjector(device.copy(trackingId = AxisRange(0, 2)))
+        fun idOf(lines: List<String>) = lines.first { it.contains(" 3 57 ") }.substringAfterLast(' ').toInt()
+        val ids = mutableListOf<Int>()
+        ids += idOf(inj.down(0, 0.1, 0.1, 0)) // 0
+        ids += idOf(inj.down(1, 0.2, 0.2, 0)) // 1
+        inj.up(1)
+        ids += idOf(inj.down(1, 0.2, 0.2, 0)) // 2
+        inj.up(1)
+        ids += idOf(inj.down(1, 0.2, 0.2, 0)) // wraps, skips 0 (still down in slot 0) -> 1
+        assertEquals(listOf(0, 1, 2, 1), ids)
     }
 
     @Test

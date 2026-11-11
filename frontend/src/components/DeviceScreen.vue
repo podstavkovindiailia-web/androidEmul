@@ -16,6 +16,7 @@ const state = reactive({
   status: 'connecting' as 'connecting' | 'starting' | 'streaming' | 'closed',
   message: '',
   deviceName: '',
+  input: '',
   width: 0,
   height: 0,
   fps: 0,
@@ -83,6 +84,7 @@ function start() {
           break
         case 'started':
           state.deviceName = msg.deviceName
+          state.input = msg.input ?? ''
           if (!state.width) {
             state.width = msg.width
             state.height = msg.height
@@ -330,6 +332,7 @@ const statusText = computed(() => {
         </div>
         <div v-if="showStats && state.status === 'streaming'" class="stats">
           {{ state.width }}×{{ state.height }} · {{ state.fps }} fps · RTT {{ state.rtt }} ms
+          <template v-if="state.input"> · ввод: {{ state.input }}</template>
           <template v-if="state.resyncs"> · resync {{ state.resyncs }}</template>
         </div>
       </div>
