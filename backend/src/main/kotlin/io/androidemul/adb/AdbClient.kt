@@ -77,6 +77,16 @@ class AdbClient(private val props: EmulatorProperties) {
 
     fun connect(address: String): String = run(listOf("connect", address)).trim()
 
+    /** Runs a short shell command on the device and returns its output. */
+    fun shellOutput(serial: String, command: String): String = run(listOf("-s", serial, "shell", command))
+
+    /**
+     * Starts `adb exec-out <command>`: raw, binary-safe stdout (no pty, no CRLF translation).
+     * stderr of the local adb client stays separate.
+     */
+    fun startExecOut(serial: String, command: List<String>): Process =
+        ProcessBuilder(listOf(adbPath, "-s", serial, "exec-out") + command).start()
+
     /** Starts a long-running `adb shell` command; the caller owns the process. */
     fun startShell(serial: String, command: List<String>): Process =
         ProcessBuilder(listOf(adbPath, "-s", serial, "shell") + command)

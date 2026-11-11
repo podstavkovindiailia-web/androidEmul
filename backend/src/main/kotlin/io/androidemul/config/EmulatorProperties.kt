@@ -3,9 +3,18 @@ package io.androidemul.config
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 
+enum class StreamMode {
+    /** Only built-in Android tools over adb: screenrecord (H.264) + sendevent/input. No extra software on the device. */
+    NATIVE,
+    /** scrcpy-server pushed to the device: lower latency, needs the scrcpy-server binary. */
+    SCRCPY,
+}
+
 @ConfigurationProperties(prefix = "emulator")
 data class EmulatorProperties(
+    val mode: StreamMode = StreamMode.NATIVE,
     val adb: Adb = Adb(),
+    val native: Native = Native(),
     val scrcpy: Scrcpy = Scrcpy(),
     val stream: Stream = Stream(),
 ) {
@@ -21,6 +30,15 @@ data class EmulatorProperties(
         /** Addresses for `adb connect` (e.g. emulator:5555) that are (re)connected automatically. */
         val autoConnect: List<String> = emptyList(),
         val commandTimeout: Duration = Duration.ofSeconds(15),
+    )
+
+    data class Native(
+        /** How often the display rotation is polled (the recording restarts with the new orientation). */
+        val rotationPollInterval: Duration = Duration.ofSeconds(1),
+        /** Min interval between screenrecord restarts triggered by viewers needing a key frame. */
+        val keyFrameCooldown: Duration = Duration.ofMillis(1000),
+        /** How long the stream must be silent before buffered data is treated as a complete frame. */
+        val frameFlushDelay: Duration = Duration.ofMillis(2),
     )
 
     data class Scrcpy(

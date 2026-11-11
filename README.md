@@ -5,39 +5,62 @@
 
 - **Backend:** Kotlin + Spring Boot (Maven), WebSocket, Java 21 virtual threads
 - **Frontend:** Vue 3 + TypeScript + Vite, WebCodecs `VideoDecoder`
-- **На устройстве:** [scrcpy-server](https://github.com/Genymobile/scrcpy) 3.1 (аппаратный H.264-энкодер + инжект событий)
+- **На устройстве:** ничего не устанавливается — по умолчанию используются только стандартные утилиты Android через `adb`
+
+## Два движка
+
+| | `native` (по умолчанию) | `scrcpy` (опционально) |
+|---|---|---|
+| Что нужно | только `adb` | `adb` + файл [scrcpy-server](https://github.com/Genymobile/scrcpy) 3.1 |
+| Видео | `screenrecord --output-format=h264` — встроенная утилита Android, аппаратный энкодер устройства | scrcpy-server, аппаратный энкодер |
+| Касания | сырые события тачскрина через `sendevent` в постоянную `adb shell`-сессию, мультитач | `InputManager.injectInputEvent` |
+| Клавиши, текст, прокрутка | `input keyevent` / `input text` / `input swipe` (≈0.2–0.5 с на команду) | мгновенно |
+| Задержка видео | низкая, но выше, чем у scrcpy | минимальная |
+| Ограничения | на Android < 14 запись идёт сегментами по 3 минуты (перезапуск незаметен, ~0.3 с); новый key frame = перезапуск записи | — |
+
+Режим выбирается переменной `EMULATOR_MODE=native|scrcpy`.
 
 ```mermaid
 flowchart LR
-  subgraph Device["Android эмулятор"]
-    S["scrcpy-server<br/>MediaCodec H.264<br/>+ инжект ввода"]
+  subgraph Device["Android эмулятор (только встроенные утилиты)"]
+    R["screenrecord<br/>H.264 (MediaCodec)"]
+    T["/dev/input/eventN<br/>тачскрин"]
+    I["input / cmd / settings"]
   end
   subgraph Backend["Spring Boot (Kotlin)"]
-    M["ScrcpySessionManager<br/>1 сессия на устройство"]
+    P["AnnexBParser<br/>поток → кадры"]
+    TI["TouchInjector<br/>sendevent, мультитач"]
     W["WebSocket /ws/stream/{serial}<br/>очередь на зрителя"]
   end
   subgraph Browser["Vue 3"]
     D["WebCodecs VideoDecoder"] --> C["canvas"]
-    P["Pointer / Keyboard events"]
+    E["Pointer / Keyboard events"]
   end
-  S -- "adb forward: видео-сокет (H.264 Annex B)" --> M
-  M -- "control-сокет (бинарные события)" --> S
-  M --> W
+  R -- "adb exec-out (сырой H.264)" --> P --> W
   W -- "binary: кадры" --> D
-  P -- "JSON: touch / key / text" --> W
+  E -- "JSON: touch / key / text" --> W
+  W --> TI -- "постоянный adb shell: sendevent" --> T
+  W -- "постоянный adb shell" --> I
 ```
 
-## Откуда низкая задержка
+## Как устроен native-движок
 
-| Звено | Что сделано |
-|---|---|
-| Захват и кодирование | `scrcpy-server` захватывает дисплей через `SurfaceControl`/`VirtualDisplay` и кодирует его аппаратным `MediaCodec` в H.264 прямо на устройстве. Никаких скриншотов и PNG. |
-| Транспорт device → backend | `adb forward` + TCP с `TCP_NODELAY`, пакеты читаются без буферизации кадров. |
-| Backend | Пакеты не перекодируются, а проксируются как есть (9-байтный заголовок + Annex B). Для каждого зрителя своя очередь и свой поток отправки: медленный браузер не тормозит остальных. Если очередь переполнилась — буфер сбрасывается, зритель ждёт следующий key frame, а устройство просит перезапустить энкодер (`RESET_VIDEO`). Задержка важнее полноты. |
-| Браузер | WebCodecs `VideoDecoder` с `optimizeForLatency: true` (аппаратное декодирование, без буфера переупорядочивания). Кадр рисуется на `<canvas>` сразу в колбэке декодера (`desynchronized: true`), без очереди и `<video>`-буфера. Если декодер не успевает — бэклог сбрасывается. |
-| Ввод | Pointer Events (включая coalesced events и мультитач) → JSON по тому же WebSocket → бинарные control-сообщения scrcpy → `InputManager.injectInputEvent` на устройстве. |
-
-На локальной машине итоговая задержка «палец → картинка» обычно 30–60 мс (в основном это энкодер устройства и vsync).
+- **Видео.** `adb exec-out screenrecord --output-format=h264 --size WxH --bit-rate N -` отдаёт сырой поток H.264.
+  У него нет заголовков пакетов, поэтому backend сам режет его на SPS/PPS и кадры (`AnnexBParser`). Кадр отправляется,
+  как только поток «затих» на 2 мс (screenrecord пишет кадр целиком за раз), — последний кадр анимации не залипает.
+- **Key frame по запросу.** Новому зрителю и зрителю, потерявшему синхронизацию, нужен ключевой кадр. Единственный способ
+  получить его от `screenrecord` — перезапустить запись (не чаще раза в секунду, запросы объединяются).
+- **3-минутный лимит.** На Android 14+ используется `--time-limit 0` (без ограничения). На старых версиях это значение
+  отвергается — backend сам переключается на сегменты по 180 с и перезапускает запись по их окончании.
+- **Поворот экрана.** Ориентация опрашивается раз в секунду (`dumpsys input`); при смене запись перезапускается
+  с новым размером, а координаты касаний пересчитываются под ориентацию панели.
+- **Касания.** При старте `getevent -lp` находит тачскрин и диапазоны его осей. События пишутся как настоящий драйвер
+  (multi-touch protocol B: `ABS_MT_SLOT`, `ABS_MT_TRACKING_ID`, `ABS_MT_POSITION_X/Y`, `BTN_TOUCH`, `SYN_REPORT`)
+  командами `sendevent` в **одну постоянную** `adb shell`-сессию — без запуска процесса adb и JVM на каждое событие.
+  Пока устройство выполняет пачку событий, новые движения пальца копятся и схлопываются в последнее положение,
+  поэтому ввод не отстаёт. Если тачскрин недоступен, жест воспроизводится через `input tap` / `input swipe` после отпускания.
+- **Клавиши, текст, системные команды** — отдельная постоянная shell-сессия: `input keyevent` (подряд идущие клавиши
+  объединяются в один вызов), `input text`, `cmd statusbar expand-notifications`, `settings put system user_rotation`.
 
 ## Быстрый старт (разработка)
 
@@ -49,10 +72,6 @@ flowchart LR
 Если SDK стоит в другом месте — задайте `ADB_PATH=/path/to/adb` или `ANDROID_HOME`.
 
 ```bash
-./scripts/download-scrcpy-server.sh
-```
-
-```bash
 cd backend && mvn spring-boot:run
 ```
 
@@ -62,6 +81,16 @@ cd frontend && npm install && npm run dev
 
 Откройте http://localhost:5173 и выберите устройство слева. Vite проксирует `/api` и `/ws` на `localhost:8080`.
 
+Режим scrcpy (по желанию):
+
+```bash
+./scripts/download-scrcpy-server.sh
+```
+
+```bash
+cd backend && EMULATOR_MODE=scrcpy mvn spring-boot:run
+```
+
 ## Сборка в один jar
 
 ```bash
@@ -69,7 +98,7 @@ cd backend && mvn -Pwith-frontend package
 ```
 
 ```bash
-java -jar backend/target/android-emul-backend-0.1.0-SNAPSHOT.jar --emulator.scrcpy.server-path=scrcpy-server/scrcpy-server
+java -jar backend/target/android-emul-backend-0.1.0-SNAPSHOT.jar
 ```
 
 UI и API будут на http://localhost:8080.
@@ -95,6 +124,9 @@ docker compose up --build
 docker compose -f docker-compose.emulator.yml up --build
 ```
 
+Образ по умолчанию содержит только `adb`. Чтобы добавить scrcpy-server, соберите с `--build-arg WITH_SCRCPY=true`
+и запустите с `EMULATOR_MODE=scrcpy`.
+
 ## Использование
 
 - мышь / тач / стилус — касания, свайпы, мультитач (pinch-to-zoom на тач-экране);
@@ -110,18 +142,21 @@ docker compose -f docker-compose.emulator.yml up --build
 
 | Переменная | По умолчанию | Описание |
 |---|---|---|
+| `EMULATOR_MODE` | `native` | движок: `native` (встроенные утилиты Android) или `scrcpy` |
 | `PORT` | `8080` | HTTP-порт |
 | `ADB_PATH` | автопоиск | путь к adb (если не задан — `PATH`, `ANDROID_HOME`, стандартные папки SDK) |
-| `ADB_FORWARD_HOST` | `127.0.0.1` | где открываются порты `adb forward` (для adb-сервера хоста из Docker — `host.docker.internal`) |
+| `ADB_FORWARD_HOST` | `127.0.0.1` | только scrcpy: где открываются порты `adb forward` (из Docker — `host.docker.internal`) |
 | `ADB_AUTO_CONNECT` | — | адреса для автоматического `adb connect`, через запятую |
-| `SCRCPY_SERVER_PATH` | `../scrcpy-server/scrcpy-server` | локальный файл scrcpy-server |
-| `SCRCPY_VERSION` | `3.1` | версия scrcpy-server (должна точно совпадать с файлом) |
 | `STREAM_MAX_SIZE` | `1280` | максимальная сторона видео, `0` — нативное разрешение |
 | `STREAM_BIT_RATE` | `8000000` | битрейт H.264 |
-| `STREAM_MAX_FPS` | `60` | ограничение FPS |
-| `STREAM_CODEC_OPTIONS` | — | опции MediaCodec, например `i-frame-interval=2` |
-| `STREAM_ENCODER` | — | конкретный энкодер, например `OMX.google.h264.encoder` |
+| `STREAM_MAX_FPS` | `60` | только scrcpy: ограничение FPS |
+| `STREAM_CODEC_OPTIONS` | — | только scrcpy: опции MediaCodec, например `i-frame-interval=2` |
+| `STREAM_ENCODER` | — | только scrcpy: конкретный энкодер |
+| `SCRCPY_SERVER_PATH` | `../scrcpy-server/scrcpy-server` | только scrcpy: локальный файл scrcpy-server |
+| `SCRCPY_VERSION` | `3.1` | только scrcpy: версия (должна совпадать с файлом) |
 | `ALLOWED_ORIGINS` | `*` | разрешённые Origin для WebSocket |
+
+Тонкие настройки native-движка (`emulator.native.*`): `rotation-poll-interval`, `key-frame-cooldown`, `frame-flush-delay`.
 
 ## Протокол
 
@@ -129,9 +164,9 @@ docker compose -f docker-compose.emulator.yml up --build
 
 - `GET /api/devices` — список устройств из `adb devices -l`;
 - `POST /api/devices/connect?address=host:port` — `adb connect`;
-- `GET /api/config` — параметры видеопотока.
+- `GET /api/config` — режим и параметры видеопотока.
 
-**WebSocket `/ws/stream/{serial}`**
+**WebSocket `/ws/stream/{serial}`** (одинаковый для обоих движков)
 
 Сервер → клиент:
 
@@ -149,28 +184,31 @@ docker compose -f docker-compose.emulator.yml up --build
 {"type":"ping","t":123.4}
 ```
 
-`action`: `0` down, `1` up, `2` move. Координаты передаются в пикселях текущего декодированного кадра вместе с его размером —
-так scrcpy отбрасывает «устаревшие» события после поворота экрана. Команды: `expandNotifications`, `expandSettings`,
-`collapsePanels`, `rotate`, `resetVideo`, `screenOn`, `screenOff`.
+`action`: `0` down, `1` up, `2` move. Координаты передаются в пикселях текущего декодированного кадра вместе с его размером.
+Команды: `expandNotifications`, `expandSettings`, `collapsePanels`, `rotate`, `resetVideo`, `screenOn`, `screenOff`.
 
 ## Структура
 
 ```
 backend/   Spring Boot (Kotlin)
-  adb/       обёртка над adb CLI
-  scrcpy/    протокол scrcpy, сессия устройства, менеджер сессий
-  ws/        WebSocket-обработчик, очередь зрителя, DTO событий
-  api/       REST
+  adb/           обёртка над adb CLI
+  stream/        общая сессия устройства, менеджер сессий, видеопакеты, протокол клиента
+  nativeengine/  движок без сторонних программ: screenrecord, AnnexBParser, sendevent, input
+  scrcpy/        опциональный движок на scrcpy-server
+  ws/            WebSocket-обработчик, очередь зрителя
+  api/           REST
 frontend/  Vue 3
   lib/decoder.ts   WebCodecs H.264 декодер
   lib/stream.ts    WebSocket-клиент
   lib/keymap.ts    клавиатура → Android keycodes
   components/      список устройств, экран с вводом
-scripts/   загрузка scrcpy-server
+scripts/   загрузка scrcpy-server (только для режима scrcpy)
 ```
 
 ## Ограничения
 
-- Звук не транслируется (`audio=false`), его можно добавить через аудиопоток scrcpy (Opus) и WebCodecs `AudioDecoder`.
-- Ввод не-ASCII текста через `INJECT_TEXT` зависит от раскладки устройства (то же ограничение, что и у scrcpy).
+- Звук не транслируется.
+- `input text` (native) печатает только ASCII; кириллицу и эмодзи так не ввести.
+- В native-режиме клавиши и текст идут через `input` и приходят с задержкой ~0.2–0.5 с; касания — без неё.
+- Экраны с `FLAG_SECURE` (банковские приложения и т. п.) `screenrecord` показывает чёрными.
 - Аутентификации нет: не выставляйте сервис в открытую сеть без reverse proxy с авторизацией.

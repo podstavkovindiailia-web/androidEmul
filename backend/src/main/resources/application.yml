@@ -21,6 +21,13 @@ app:
   allowed-origins: ${ALLOWED_ORIGINS:*}
 
 emulator:
+  # native: only built-in Android tools (screenrecord + sendevent/input), nothing is installed on the device
+  # scrcpy: scrcpy-server is pushed to the device (lower latency, needs scripts/download-scrcpy-server.sh)
+  mode: ${EMULATOR_MODE:native}
+  native:
+    rotation-poll-interval: 1s
+    key-frame-cooldown: 1s
+    frame-flush-delay: 2ms
   adb:
     path: ${ADB_PATH:adb}
     forward-host: ${ADB_FORWARD_HOST:127.0.0.1}

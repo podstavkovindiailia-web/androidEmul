@@ -4,7 +4,7 @@ import io.androidemul.adb.AdbClient
 import io.androidemul.adb.AdbDevice
 import io.androidemul.adb.AdbException
 import io.androidemul.config.EmulatorProperties
-import io.androidemul.scrcpy.ScrcpySessionManager
+import io.androidemul.stream.DeviceSessionManager
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -20,7 +20,7 @@ data class DeviceDto(val serial: String, val state: String, val model: String?, 
 @RequestMapping("/api")
 class DeviceController(
     private val adb: AdbClient,
-    private val manager: ScrcpySessionManager,
+    private val manager: DeviceSessionManager,
     private val props: EmulatorProperties,
 ) {
     @GetMapping("/devices")
@@ -39,7 +39,7 @@ class DeviceController(
     }
 
     @GetMapping("/config")
-    fun config() = props.stream
+    fun config() = mapOf("mode" to props.mode.name.lowercase(), "stream" to props.stream)
 
     @ExceptionHandler(AdbException::class)
     fun adbError(e: AdbException) = ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(mapOf("error" to e.message))

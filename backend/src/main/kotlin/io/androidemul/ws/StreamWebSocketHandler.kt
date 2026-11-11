@@ -2,8 +2,9 @@ package io.androidemul.ws
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.androidemul.config.EmulatorProperties
-import io.androidemul.scrcpy.ScrcpySession
-import io.androidemul.scrcpy.ScrcpySessionManager
+import io.androidemul.stream.ClientMessage
+import io.androidemul.stream.DeviceSession
+import io.androidemul.stream.DeviceSessionManager
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.socket.CloseStatus
@@ -20,18 +21,18 @@ import java.nio.charset.StandardCharsets
  */
 @Component
 class StreamWebSocketHandler(
-    private val manager: ScrcpySessionManager,
+    private val manager: DeviceSessionManager,
     private val mapper: ObjectMapper,
     private val props: EmulatorProperties,
 ) : TextWebSocketHandler() {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    private data class Binding(val session: ScrcpySession, val viewer: WebSocketViewer)
+    private data class Binding(val session: DeviceSession, val viewer: WebSocketViewer)
 
     override fun afterConnectionEstablished(ws: WebSocketSession) {
         val serial = URLDecoder.decode(ws.uri!!.path.substringAfterLast('/'), StandardCharsets.UTF_8)
         log.info("Viewer {} connected to {}", ws.id, serial)
-        lateinit var session: ScrcpySession
+        lateinit var session: DeviceSession
         val viewer = WebSocketViewer(ws, mapper, props.stream.viewerQueueSize) { session.requestKeyFrame() }
         viewer.sendJson(mapOf("type" to "starting", "serial" to serial))
         try {
@@ -55,7 +56,7 @@ class StreamWebSocketHandler(
             binding.viewer.sendJson(mapOf("type" to "pong", "t" to msg.t))
             return
         }
-        msg.toControlMessage()?.let(binding.session::send)
+        binding.session.handle(msg)
     }
 
     override fun afterConnectionClosed(ws: WebSocketSession, status: CloseStatus) {

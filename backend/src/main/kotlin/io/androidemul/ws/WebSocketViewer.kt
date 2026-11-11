@@ -1,9 +1,9 @@
 package io.androidemul.ws
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import io.androidemul.scrcpy.SessionInfo
-import io.androidemul.scrcpy.StreamViewer
-import io.androidemul.scrcpy.VideoPacket
+import io.androidemul.stream.SessionInfo
+import io.androidemul.stream.StreamViewer
+import io.androidemul.stream.VideoPacket
 import org.slf4j.LoggerFactory
 import org.springframework.web.socket.BinaryMessage
 import org.springframework.web.socket.CloseStatus

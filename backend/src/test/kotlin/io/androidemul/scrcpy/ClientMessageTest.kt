@@ -1,7 +1,7 @@
-package io.androidemul.ws
+package io.androidemul.scrcpy
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import io.androidemul.scrcpy.ControlMessage
+import io.androidemul.stream.ClientMessage
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull

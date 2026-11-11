@@ -1,4 +1,4 @@
-package io.androidemul.scrcpy
+package io.androidemul.stream
 
 /** One packet of the scrcpy video stream (H.264 Annex B). */
 class VideoPacket(

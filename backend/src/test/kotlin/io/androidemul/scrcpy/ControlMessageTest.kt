@@ -1,5 +1,7 @@
 package io.androidemul.scrcpy
 
+import io.androidemul.stream.VideoPacket
+
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
